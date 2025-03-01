@@ -11,11 +11,81 @@ from core.character import Character, CharacterStats
 from core.dice import DiceSet, Dice, DiceFace
 from core.enums import DiceType, FaceCategory, RoomType, Rarity
 from core.inventory import Inventory, Item, ItemFactory
-from game.dungeon import Floor, Room, Enemy, DungeonGenerator
+from game.dungeon import Floor, Room, Enemy, DungeonGenerator, Event
 from game.combat import CombatSystem, CombatResult
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GameState:
+    """
+    Represents the current state of the game.
+    """
+    player: Character
+    inventory: Inventory
+    current_floor: Optional[Floor] = None
+    floors: List[Floor] = field(default_factory=list)
+    floor_level: int = 1
+    in_combat: bool = False
+    combat_enemies: List[Enemy] = field(default_factory=list)
+    game_over: bool = False
+    victory: bool = False
+    
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for serialization."""
+        return {
+            "player": self.player.to_dict(),
+            "inventory": self.inventory.to_dict(),
+            "current_floor": self.current_floor.to_dict() if self.current_floor else None,
+            "floors": [floor.to_dict() for floor in self.floors],
+            "floor_level": self.floor_level,
+            "in_combat": self.in_combat,
+            "combat_enemies": [enemy.to_dict() for enemy in self.combat_enemies],
+            "game_over": self.game_over,
+            "victory": self.victory
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'GameState':
+        """Create a GameState from a dictionary."""
+        from core.character import Character
+        from core.inventory import Inventory
+        from game.dungeon import Floor, Enemy
+        
+        # Create player
+        player_data = data.get("player", {})
+        player = Character.from_dict(player_data)
+        
+        # Create inventory
+        inventory_data = data.get("inventory", {})
+        inventory = Inventory.from_dict(inventory_data)
+        
+        # Create floors
+        floors_data = data.get("floors", [])
+        floors = [Floor.from_dict(floor_data) for floor_data in floors_data]
+        
+        # Create current floor
+        current_floor_data = data.get("current_floor")
+        current_floor = Floor.from_dict(current_floor_data) if current_floor_data else None
+        
+        # Create combat enemies
+        combat_enemies_data = data.get("combat_enemies", [])
+        combat_enemies = [Enemy.from_dict(enemy_data) for enemy_data in combat_enemies_data]
+        
+        # Create game state
+        return cls(
+            player=player,
+            inventory=inventory,
+            current_floor=current_floor,
+            floors=floors,
+            floor_level=data.get("floor_level", 1),
+            in_combat=data.get("in_combat", False),
+            combat_enemies=combat_enemies,
+            game_over=data.get("game_over", False),
+            victory=data.get("victory", False)
+        )
 
 
 class DiceManager:
@@ -471,8 +541,8 @@ class GameInstance:
                 player.stats.crit_chance += 0.05
             
             # Create inventory with starting items
-            inventory = Inventory(max_size=self.config.get("inventory_size", 20))
-            inventory.add_gold(self.config.get("starting_gold", 50))
+            inventory = Inventory(max_size=self.config.get("game", {}).get("inventory_size", 20))
+            inventory.add_gold(self.config.get("game", {}).get("starting_gold", 50))
             
             # Add starter items
             item_factory = ItemFactory()
@@ -625,7 +695,7 @@ class GameInstance:
             "gold": room.gold,
             "event": {"name": room.event.name, "description": room.event.description, "choices": room.event.choices} if room.event else None,
             "in_combat": self.state.in_combat,
-            "paths": self.state.current_floor.get_available_paths()
+            "paths": [(index, r.name, r.room_type.name) for index, r in self.state.current_floor.get_available_paths()]
         }
     
     def handle_combat_turn(self, dice_type: DiceType, dice_index: int, target_index: int = 0) -> Dict[str, Any]:
@@ -1125,69 +1195,3 @@ class GameInstance:
             "gold": self.state.inventory.gold,
             "inventory_count": f"{len(self.state.inventory.items)}/{self.state.inventory.max_size}"
         }
-    """
-    Represents the current state of the game.
-    """
-    player: Character
-    inventory: Inventory
-    current_floor: Optional[Floor] = None
-    floors: List[Floor] = field(default_factory=list)
-    floor_level: int = 1
-    in_combat: bool = False
-    combat_enemies: List[Enemy] = field(default_factory=list)
-    game_over: bool = False
-    victory: bool = False
-    
-    def to_dict(self) -> Dict:
-        """Convert to dictionary for serialization."""
-        return {
-            "player": self.player.to_dict(),
-            "inventory": self.inventory.to_dict(),
-            "current_floor": self.current_floor.to_dict() if self.current_floor else None,
-            "floors": [floor.to_dict() for floor in self.floors],
-            "floor_level": self.floor_level,
-            "in_combat": self.in_combat,
-            "combat_enemies": [enemy.to_dict() for enemy in self.combat_enemies],
-            "game_over": self.game_over,
-            "victory": self.victory
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'GameState':
-        """Create a GameState from a dictionary."""
-        from core.character import Character
-        from core.inventory import Inventory
-        from game.dungeon import Floor, Enemy
-        
-        # Create player
-        player_data = data.get("player", {})
-        player = Character.from_dict(player_data)
-        
-        # Create inventory
-        inventory_data = data.get("inventory", {})
-        inventory = Inventory.from_dict(inventory_data)
-        
-        # Create floors
-        floors_data = data.get("floors", [])
-        floors = [Floor.from_dict(floor_data) for floor_data in floors_data]
-        
-        # Create current floor
-        current_floor_data = data.get("current_floor")
-        current_floor = Floor.from_dict(current_floor_data) if current_floor_data else None
-        
-        # Create combat enemies
-        combat_enemies_data = data.get("combat_enemies", [])
-        combat_enemies = [Enemy.from_dict(enemy_data) for enemy_data in combat_enemies_data]
-        
-        # Create game state
-        return cls(
-            player=player,
-            inventory=inventory,
-            current_floor=current_floor,
-            floors=floors,
-            floor_level=data.get("floor_level", 1),
-            in_combat=data.get("in_combat", False),
-            combat_enemies=combat_enemies,
-            game_over=data.get("game_over", False),
-            victory=data.get("victory", False)
-        )

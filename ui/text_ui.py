@@ -5,7 +5,8 @@ Text-based UI for the dice roguelike game
 import os
 import time
 import sys
-from typing import Dict, List, Any, Optional
+import random
+from typing import Dict, List, Any, Optional, Tuple
 import logging
 from core.enums import DiceType, RoomType
 from game.game_instance import GameInstance
@@ -198,176 +199,7 @@ class TextUI:
             choice = self.get_menu_choice(options, "Select an action: ")
             
             if choice == 0:  # Use Item
-                item_index = self.get_menu_choice([item['name'] for item in inventory_result['items']], "Select an item to use: ")
-                use_result = self.game.handle_inventory("use", item_index)
-                
-                print(use_result['message'])
-                self.wait_for_key()
-                continue
-            
-            elif choice == len(combat_dice) + 1:
-                # Run away
-                if self.get_yes_no("Are you sure you want to run away? You may take damage while fleeing. (y/n): "):
-                    # 50% chance to escape
-                    if random.random() < 0.5:
-                        print("You successfully escape from combat!")
-                        self.game.state.in_combat = False
-                        self.game.state.combat_enemies = []
-                        self.wait_for_key()
-                        return
-                    else:
-                        # Take damage for failing to escape
-                        damage = random.randint(5, 15)
-                        self.game.state.player.stats.health -= damage
-                        print(f"You failed to escape and took {damage} damage!")
-                        
-                        # Check if player died
-                        if self.game.state.player.stats.health <= 0:
-                            self.game.state.player.stats.health = 0
-                            self.game.state.game_over = True
-                            self.game.state.in_combat = False
-                            print("You have been defeated while trying to escape!")
-                            self.wait_for_key()
-                            return
-                        
-                        self.wait_for_key()
-                        continue
-                else:
-                    continue
-            
-            if 0 <= choice < len(combat_dice):
-                # Roll selected die
-                dice_type, dice_index, die = combat_dice[choice]
-                
-                # If multiple enemies, select target
-                target_index = 0
-                if len(self.game.state.combat_enemies) > 1:
-                    target_index = self.get_menu_choice(
-                        [f"{i+1}. {e.name} - Health: {e.health}/{e.max_health}" for i, e in enumerate(self.game.state.combat_enemies)],
-                        "Select a target: "
-                    )
-                
-                # Execute combat turn
-                result = self.game.handle_combat_turn(DiceType[dice_type], dice_index, target_index)
-                
-                if 'error' in result:
-                    print(f"Error: {result['error']}")
-                    self.wait_for_key()
-                    continue
-                
-                # Display results
-                print(f"\n{result['message']}")
-                
-                if 'combat_over' in result and result['combat_over']:
-                    if 'player_defeated' in result and result['player_defeated']:
-                        print("You have been defeated!")
-                        self.wait_for_key()
-                        return
-                    else:
-                        print("All enemies defeated!")
-                        if 'gold_reward' in result:
-                            print(f"You gained {result['gold_reward']} gold and {result['xp_reward']} XP.")
-                        self.wait_for_key()
-                        return
-                
-                # Display enemy turns
-                if 'enemy_turns' in result:
-                    self.print_separator()
-                    print("Enemy Turns:")
-                    for enemy_result in result['enemy_turns']:
-                        print(f"- {enemy_result['message']}")
-                
-                if 'combat_log' in result:
-                    self.print_separator()
-                    print("Combat Log:")
-                    for entry in result['combat_log']:
-                        print(f"- {entry}")
-                
-                self.wait_for_key()
-    
-    def show_room_actions(self, room_info: Dict[str, Any]) -> None:
-        """Show available actions in the current room."""
-        self.print_separator()
-        print("Actions:")
-        
-        options = ["Character Info", "Inventory", "Dice Collection", "Dungeon Info"]
-        
-        # Add navigation if paths are available
-        if room_info['paths']:
-            options.append("Move to Next Room")
-        
-        options.append("Save Game")
-        options.append("Quit Game")
-        
-        choice = self.get_menu_choice(options, "What would you like to do? ")
-        
-        if choice == 0:  # Character Info
-            self.show_character_info()
-        elif choice == 1:  # Inventory
-            self.show_inventory()
-        elif choice == 2:  # Dice Collection
-            self.show_dice()
-        elif choice == 3:  # Dungeon Info
-            self.show_dungeon_info()
-        elif choice == 4 and room_info['paths']:  # Move to Next Room
-            path_choice = self.get_menu_choice(
-                [f"{name} ({room_type})" for _, name, room_type in room_info['paths']],
-                "Select a path: "
-            )
-            self.game.handle_navigation(room_info['paths'][path_choice][0])
-        elif choice == len(options) - 2:  # Save Game
-            filename = input("Enter save file name: ")
-            if filename:
-                success = self.game.save_game(filename)
-                if success:
-                    print(f"Game saved as {filename}.")
-                else:
-                    print("Failed to save game.")
-                self.wait_for_key()
-        elif choice == len(options) - 1:  # Quit Game
-            if self.get_yes_no("Are you sure you want to quit? (y/n): "):
-                self.running = False
-    
-    def run(self) -> None:
-        """Run the main game loop."""
-        self.running = True
-        
-        while self.running:
-            # If no game is active, show main menu
-            if not self.game.state:
-                action = self.show_main_menu()
-                
-                if action == "new_game":
-                    player_choices = self.show_character_creation()
-                    success = self.game.new_game(player_choices["name"], player_choices["class"])
-                    
-                    if not success:
-                        print("Failed to create new game.")
-                        self.wait_for_key()
-                
-                elif action == "load_game":
-                    save_file = self.show_load_game()
-                    if save_file:
-                        success = self.game.load_game(save_file)
-                        
-                        if not success:
-                            print(f"Failed to load game from {save_file}.")
-                            self.wait_for_key()
-                
-                elif action == "exit":
-                    self.running = False
-                    print("Thanks for playing!")
-                    break
-            
-            # If game is active, show the current room
-            else:
-                self.show_room()
-                
-                # Check for game over
-                if self.game.state and self.game.state.game_over:
-                    self.show_game_over(self.game.state.victory)
-                    # Reset game state
-                    self.game.state = Noneget_menu_choice([item['name'] for item in result['items']], "Select an item to use: ")
+                item_index = self.get_menu_choice([item['name'] for item in result['items']], "Select an item to use: ")
                 use_result = self.game.handle_inventory("use", item_index)
                 
                 if 'error' in use_result:
@@ -452,7 +284,7 @@ class TextUI:
         print("Faces:")
         
         for i, face in enumerate(die['faces']):
-            value_str = f"+{face['value']}" if face['value'] > 0 else face['value']
+            value_str = f"+{face['value']}" if face['value'] > 0 else str(face['value'])
             print(f"{i+1}. {face['name']} ({value_str}, {face['category']})")
             print(f"   {face['description']}")
             
@@ -489,61 +321,166 @@ class TextUI:
         
         self.wait_for_key()
     
-    def show_room(self) -> None:
-        """Show the current room and available actions."""
-        if not self.game.state:
+    def handle_combat(self, enemies: List[Dict[str, Any]]) -> None:
+        """Handle combat sequences."""
+        if not self.game.state or not self.game.state.in_combat:
             return
-        
-        room_info = self.game.handle_room()
-        
-        # Handle game over
-        if self.game.state.game_over:
-            self.show_game_over(self.game.state.victory)
-            self.running = False
-            return
-        
-        # Display room
-        self.print_header(f"{room_info['name']} - {room_info['room_type']}")
-        print(room_info['description'])
-        
-        # If in combat, handle combat
-        if room_info['in_combat']:
-            self.handle_combat(room_info['enemies'])
-            return
-        
-        # Display room contents
-        if room_info['enemies']:
+            
+        while self.game.state.in_combat:
+            self.print_header("COMBAT")
+            
+            # Display player info
+            player_info = self.game.get_player_info()
+            print(f"{player_info['name']} - Health: {player_info['health']}/{player_info['max_health']} | Mana: {player_info['mana']}/{player_info['max_mana']}")
+            
+            # Display enemies
             self.print_separator()
             print("Enemies:")
-            for enemy in room_info['enemies']:
-                print(f"- {enemy['name']} ({enemy['health']}/{enemy['max_health']} HP)")
-        
-        if room_info['items']:
+            for i, enemy in enumerate(self.game.state.combat_enemies):
+                print(f"{i+1}. {enemy.name} - Health: {enemy.health}/{enemy.max_health}")
+            
+            # Get available dice
+            dice_info = self.game.get_dice_info()
+            combat_dice = []
+            
+            for dice_type in ["COMBAT", "SPECIAL"]:
+                if dice_type in dice_info:
+                    for die_index, die in enumerate(dice_info[dice_type]):
+                        if die['cooldown'] == 0:
+                            combat_dice.append((dice_type, die_index, die))
+            
+            # Display available dice
             self.print_separator()
-            print("Items:")
-            for item in room_info['items']:
-                print(f"- {item['name']}: {item['description']}")
-        
-        if room_info['gold'] > 0:
-            self.print_separator()
-            print(f"Gold: {room_info['gold']}")
-        
-        # Handle room specific actions
-        if room_info['room_type'] == "REST":
-            self.handle_rest_site()
-        elif room_info['room_type'] == "SHOP":
-            self.handle_shop(room_info)
-        elif room_info['room_type'] == "EVENT" and room_info['event']:
-            self.handle_event(room_info['event'])
-        elif room_info['room_type'] == "TRAP" and room_info['event']:
-            self.handle_event(room_info['event'])
-        elif room_info['room_type'] == "EXIT":
-            print("\nYou've found the exit to the next floor!")
-            if self.get_yes_no("Proceed to the next floor? (y/n): "):
-                return  # Proceed to next floor
-        
-        # Show available actions
-        self.show_room_actions(room_info)
+            print("Available Dice:")
+            
+            if not combat_dice:
+                print("No dice available! All on cooldown.")
+                # Skip turn
+                self.wait_for_key()
+                
+                # Process enemy turns directly
+                for enemy in self.game.state.combat_enemies:
+                    result = self.game.combat_system.enemy_turn(enemy, self.game.state.player)
+                    print(f"{result.message}")
+                    
+                    if result.target_defeated:
+                        self.game.state.game_over = True
+                        print("You have been defeated!")
+                        self.wait_for_key()
+                        return
+                
+                self.wait_for_key()
+                continue
+            
+            for i, (dice_type, dice_index, die) in enumerate(combat_dice):
+                print(f"{i+1}. {die['name']} (d{die['size']}, {die['rarity']})")
+            
+            # Add inventory and run away options
+            print(f"{len(combat_dice)+1}. Use Item")
+            print(f"{len(combat_dice)+2}. Run Away")
+            
+            # Get player action
+            choice = int(input("\nChoose a die to roll (or other action): ")) - 1
+            
+            if choice == len(combat_dice):
+                # Show inventory
+                inventory_result = self.game.handle_inventory("view")
+                
+                if not inventory_result['items']:
+                    print("Your inventory is empty.")
+                    self.wait_for_key()
+                    continue
+                
+                item_index = self.get_menu_choice([item['name'] for item in inventory_result['items']], "Select an item to use: ")
+                use_result = self.game.handle_inventory("use", item_index)
+                
+                if 'error' in use_result:
+                    print(f"Error: {use_result['error']}")
+                else:
+                    print(use_result['message'])
+                
+                self.wait_for_key()
+                continue
+                
+            elif choice == len(combat_dice) + 1:
+                # Run away
+                if self.get_yes_no("Are you sure you want to run away? You may take damage while fleeing. (y/n): "):
+                    # 50% chance to escape
+                    if random.random() < 0.5:
+                        print("You successfully escape from combat!")
+                        self.game.state.in_combat = False
+                        self.game.state.combat_enemies = []
+                        self.wait_for_key()
+                        return
+                    else:
+                        # Take damage for failing to escape
+                        damage = random.randint(5, 15)
+                        self.game.state.player.stats.health -= damage
+                        print(f"You failed to escape and took {damage} damage!")
+                        
+                        # Check if player died
+                        if self.game.state.player.stats.health <= 0:
+                            self.game.state.player.stats.health = 0
+                            self.game.state.game_over = True
+                            self.game.state.in_combat = False
+                            print("You have been defeated while trying to escape!")
+                            self.wait_for_key()
+                            return
+                        
+                        self.wait_for_key()
+                        continue
+                else:
+                    continue
+            
+            if 0 <= choice < len(combat_dice):
+                # Roll selected die
+                dice_type, dice_index, die = combat_dice[choice]
+                
+                # If multiple enemies, select target
+                target_index = 0
+                if len(self.game.state.combat_enemies) > 1:
+                    target_index = self.get_menu_choice(
+                        [f"{i+1}. {e.name} - Health: {e.health}/{e.max_health}" for i, e in enumerate(self.game.state.combat_enemies)],
+                        "Select a target: "
+                    )
+                
+                # Execute combat turn
+                result = self.game.handle_combat_turn(DiceType[dice_type], dice_index, target_index)
+                
+                if 'error' in result:
+                    print(f"Error: {result['error']}")
+                    self.wait_for_key()
+                    continue
+                
+                # Display results
+                print(f"\n{result['message']}")
+                
+                if 'combat_over' in result and result['combat_over']:
+                    if 'player_defeated' in result and result['player_defeated']:
+                        print("You have been defeated!")
+                        self.wait_for_key()
+                        return
+                    else:
+                        print("All enemies defeated!")
+                        if 'gold_reward' in result:
+                            print(f"You gained {result['gold_reward']} gold and {result['xp_reward']} XP.")
+                        self.wait_for_key()
+                        return
+                
+                # Display enemy turns
+                if 'enemy_turns' in result:
+                    self.print_separator()
+                    print("Enemy Turns:")
+                    for enemy_result in result['enemy_turns']:
+                        print(f"- {enemy_result['message']}")
+                
+                if 'combat_log' in result:
+                    self.print_separator()
+                    print("Combat Log:")
+                    for entry in result['combat_log']:
+                        print(f"- {entry}")
+                
+                self.wait_for_key()
     
     def handle_rest_site(self) -> None:
         """Handle interactions at a rest site."""
@@ -626,59 +563,141 @@ class TextUI:
         print(f"\n{result['message']}")
         self.wait_for_key()
     
-    def handle_combat(self, enemies: List[Dict[str, Any]]) -> None:
-        """Handle combat sequences."""
-        while self.game.state.in_combat:
-            self.print_header("COMBAT")
-            
-            # Display player info
-            player_info = self.game.get_player_info()
-            print(f"{player_info['name']} - Health: {player_info['health']}/{player_info['max_health']} | Mana: {player_info['mana']}/{player_info['max_mana']}")
-            
-            # Display enemies
+    def show_room(self) -> None:
+        """Show the current room and available actions."""
+        if not self.game.state:
+            return
+        
+        room_info = self.game.handle_room()
+        
+        # Handle game over
+        if self.game.state.game_over:
+            return
+        
+        # Display room
+        self.print_header(f"{room_info['name']} - {room_info['room_type']}")
+        print(room_info['description'])
+        
+        # If in combat, handle combat
+        if room_info['in_combat']:
+            self.handle_combat(room_info['enemies'])
+            return
+        
+        # Display room contents
+        if room_info['enemies']:
             self.print_separator()
             print("Enemies:")
-            for i, enemy in enumerate(self.game.state.combat_enemies):
-                print(f"{i+1}. {enemy.name} - Health: {enemy.health}/{enemy.max_health}")
-            
-            # Get available dice
-            dice_info = self.game.get_dice_info()
-            combat_dice = []
-            
-            for dice_type in ["COMBAT", "SPECIAL"]:
-                if dice_type in dice_info:
-                    for die_index, die in enumerate(dice_info[dice_type]):
-                        if die['cooldown'] == 0:
-                            combat_dice.append((dice_type, die_index, die))
-            
-            # Display available dice
+            for enemy in room_info['enemies']:
+                print(f"- {enemy['name']} ({enemy['health']}/{enemy['max_health']} HP)")
+        
+        if room_info['items']:
             self.print_separator()
-            print("Available Dice:")
-            
-            if not combat_dice:
-                print("No dice available! All on cooldown.")
-                # Skip turn
+            print("Items:")
+            for item in room_info['items']:
+                print(f"- {item['name']}: {item['description']}")
+        
+        if room_info['gold'] > 0:
+            self.print_separator()
+            print(f"Gold: {room_info['gold']}")
+        
+        # Handle room specific actions
+        if room_info['room_type'] == "REST":
+            self.handle_rest_site()
+        elif room_info['room_type'] == "SHOP":
+            self.handle_shop(room_info)
+        elif room_info['room_type'] == "EVENT" and room_info['event']:
+            self.handle_event(room_info['event'])
+        elif room_info['room_type'] == "TRAP" and room_info['event']:
+            self.handle_event(room_info['event'])
+        elif room_info['room_type'] == "EXIT":
+            print("\nYou've found the exit to the next floor!")
+            if self.get_yes_no("Proceed to the next floor? (y/n): "):
+                return  # Proceed to next floor
+        
+        # Show available actions
+        self.show_room_actions(room_info)
+    
+    def show_room_actions(self, room_info: Dict[str, Any]) -> None:
+        """Show available actions in the current room."""
+        self.print_separator()
+        print("Actions:")
+        
+        options = ["Character Info", "Inventory", "Dice Collection", "Dungeon Info"]
+        
+        # Add navigation if paths are available
+        if room_info['paths']:
+            options.append("Move to Next Room")
+        
+        options.append("Save Game")
+        options.append("Quit Game")
+        
+        choice = self.get_menu_choice(options, "What would you like to do? ")
+        
+        if choice == 0:  # Character Info
+            self.show_character_info()
+        elif choice == 1:  # Inventory
+            self.show_inventory()
+        elif choice == 2:  # Dice Collection
+            self.show_dice()
+        elif choice == 3:  # Dungeon Info
+            self.show_dungeon_info()
+        elif choice == 4 and room_info['paths']:  # Move to Next Room
+            path_choice = self.get_menu_choice(
+                [f"{name} ({room_type})" for _, name, room_type in room_info['paths']],
+                "Select a path: "
+            )
+            room_index = room_info['paths'][path_choice][0]
+            self.game.handle_navigation(room_index)
+        elif choice == len(options) - 2:  # Save Game
+            filename = input("Enter save file name: ")
+            if filename:
+                success = self.game.save_game(filename)
+                if success:
+                    print(f"Game saved as {filename}.")
+                else:
+                    print("Failed to save game.")
                 self.wait_for_key()
-                # Process enemy turns directly
-                continue
-            
-            for i, (dice_type, dice_index, die) in enumerate(combat_dice):
-                print(f"{i+1}. {die['name']} (d{die['size']}, {die['rarity']})")
-            
-            # Add use item option
-            print(f"{len(combat_dice)+1}. Use Item")
-            print(f"{len(combat_dice)+2}. Run Away")
-            
-            # Get player action
-            choice = int(input("\nChoose a die to roll (or other action): ")) - 1
-            
-            if choice == len(combat_dice):
-                # Use item
-                inventory_result = self.game.handle_inventory("view")
+        elif choice == len(options) - 1:  # Quit Game
+            if self.get_yes_no("Are you sure you want to quit? Progress since last save will be lost. (y/n): "):
+                self.running = False
+    
+    def run(self) -> None:
+        """Run the main game loop."""
+        self.running = True
+        
+        while self.running:
+            # If no game is active, show main menu
+            if not self.game.state:
+                action = self.show_main_menu()
                 
-                if not inventory_result['items']:
-                    print("Your inventory is empty.")
-                    self.wait_for_key()
-                    continue
+                if action == "new_game":
+                    player_choices = self.show_character_creation()
+                    success = self.game.new_game(player_choices["name"], player_choices["class"])
+                    
+                    if not success:
+                        print("Failed to create new game.")
+                        self.wait_for_key()
                 
-                item_index = self.
+                elif action == "load_game":
+                    save_file = self.show_load_game()
+                    if save_file:
+                        success = self.game.load_game(save_file)
+                        
+                        if not success:
+                            print(f"Failed to load game from {save_file}.")
+                            self.wait_for_key()
+                
+                elif action == "exit":
+                    self.running = False
+                    print("Thanks for playing!")
+                    break
+            
+            # If game is active, show the current room
+            else:
+                self.show_room()
+                
+                # Check for game over
+                if self.game.state and self.game.state.game_over:
+                    self.show_game_over(self.game.state.victory)
+                    # Reset game state
+                    self.game.state = None
