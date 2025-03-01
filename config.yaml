@@ -1,0 +1,10 @@
+debug: false
+save_dir: saves
+ui:
+  type: text
+  screen_width: 80
+  screen_height: 24
+game:
+  difficulty: normal
+  starting_gold: 50
+  inventory_size: 20
